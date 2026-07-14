@@ -17,10 +17,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from litellm.exceptions import ModifyResponseException
 
 from lexvault.engine import derive_placeholder
-from lexvault.guardrail import LexVaultGuardrail
+from lexvault.guardrail import LexVaultGuardrail, ModifyResponseException
 
 pytestmark = pytest.mark.asyncio
 

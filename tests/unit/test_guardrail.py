@@ -301,7 +301,7 @@ class TestCrossHookConsistency:
 class TestFailClosed:
     async def test_mask_error_blocks_when_fail_closed(self, guardrail):
         """A vault error during mask raises (no original reaches upstream)."""
-        from litellm.exceptions import ModifyResponseException
+        from lexvault.guardrail import ModifyResponseException
 
         guardrail._vault = MagicMock()
         guardrail._vault.assign = MagicMock(side_effect=RuntimeError("vault down"))
@@ -318,7 +318,7 @@ class TestFailClosed:
         asserting `pytest.raises` would not catch a leak via the exception's
         request_data/original_response fields.
         """
-        from litellm.exceptions import ModifyResponseException
+        from lexvault.guardrail import ModifyResponseException
 
         guardrail._vault = MagicMock()
         guardrail._vault._lookup_sync = MagicMock(side_effect=RuntimeError("vault down"))

@@ -36,7 +36,9 @@ from litellm.integrations.custom_guardrail import CustomGuardrail
 try:
     from litellm.exceptions import ModifyResponseException
 except ImportError:  # pragma: no cover - litellm < ~1.81
-    from litellm.integrations.custom_guardrail import ModifyResponseException  # type: ignore[attr-defined]
+    from litellm.integrations.custom_guardrail import (
+        ModifyResponseException,  # type: ignore[attr-defined]
+    )
 from litellm.types.guardrails import GuardrailEventHooks
 
 from lexvault.adapters import anthropic as anthropic_adapter
@@ -55,7 +57,7 @@ from lexvault.streaming.restore import (
 )
 from lexvault.vault import MappingVault, VaultError
 
-__all__ = ["LexVaultGuardrail"]
+__all__ = ["LexVaultGuardrail", "ModifyResponseException"]
 
 logger = logging.getLogger("lexvault")
 
