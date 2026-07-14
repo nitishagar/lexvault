@@ -1,0 +1,111 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lexvault"
+version = "0.1.0"
+description = "Reversible proprietary-term pseudonymization guardrail for LiteLLM — mask your codenames/products/schema on the way out, restore them faithfully on the way back."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "nitishagar" },
+]
+keywords = [
+    "litellm",
+    "guardrail",
+    "pseudonymization",
+    "redaction",
+    "privacy",
+    "llm",
+    "proxy",
+    "enterprise",
+    "reversible-masking",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "litellm>=1.80.15",
+    "pyahocorasick>=2.3.1",
+    "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nitishagar/lexvault"
+Documentation = "https://nitishagar.github.io/lexvault/"
+Issues = "https://github.com/nitishagar/lexvault/issues"
+Changelog = "https://github.com/nitishagar/lexvault/blob/main/CHANGELOG.md"
+Source = "https://github.com/nitishagar/lexvault"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lexvault"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src",
+    "shim",
+    "examples",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
+]
+
+# --------------------------------------------------------------------------- #
+# Ruff — lint + format
+# --------------------------------------------------------------------------- #
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# E501 handled by formatter; S101 (assert) is fine in tests.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# --------------------------------------------------------------------------- #
+# mypy — strict on the package
+# --------------------------------------------------------------------------- #
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+files = ["src/lexvault"]
+
+# litellm is a large, untyped-ish dependency; don't fail mypy on its stubs.
+[[tool.mypy.overrides]]
+module = ["litellm.*", "ahocorasick.*"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------------------- #
+# pytest
+# --------------------------------------------------------------------------- #
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra"

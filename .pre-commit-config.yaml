@@ -1,0 +1,30 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        files: ^src/lexvault/
+        additional_dependencies:
+          - pydantic>=2.0
+          - pyahocorasick>=2.3.1
+          - litellm>=1.80.15
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-yaml
+        # MkDocs multi-doc + examples config are valid YAML; exclude generated/multi cases if any
+        exclude: ^(docs/|examples/.*docker-compose)
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict

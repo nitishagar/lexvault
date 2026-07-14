@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg-link
+.eggs/
+build/
+develop-eggs/
+dist/
+downloads/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Type-checker / test caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# lexvault local vault file (contains sensitive originals — never commit)
+*.db
+vault.db
+*.db-shm
+*.db-wal
+~/.lexvault/
+
+# Docs build
+site/
+
+# MkDocs / Material
+docs/__pycache__/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Local agent / planning / strategy artifacts (kept local, not published)
+.claude/
+.zcode/
+thoughts/
+lexvault-research.md
+
+# Large-file guard (pre-commit check-added-large-files)
