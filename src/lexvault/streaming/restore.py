@@ -129,6 +129,14 @@ async def _restore_bytes(
     async for raw in upstream:
         reframer.feed(bytes(raw))
         for frame in reframer.drain_complete():
+            # CS-E3 ordering: when a content_block_stop closes a block, flush any
+            # held tail for THAT index as a delta BEFORE the stop frame, so held
+            # text never emits after content_block_stop (which corrupts tool-arg
+            # JSON assembly + stream ordering).
+            closed_index = _content_block_stop_index(frame)
+            if closed_index is not None:
+                async for out in _flush_index(bufs, closed_index, vault, suppress_partial=True):
+                    yield out
             slots = extract_frame_text(frame)
             if not slots:
                 # Non-restorable frame (signature_delta, message_delta, ping) or
@@ -154,6 +162,7 @@ async def _restore_bytes(
             yield restore_frame_text(frame, restorations)
 
     # Flush every per-(index,type) buffer on stream end.
+    had_partial = False
     for (index, pointer), buf in bufs.items():
         try:
             tail, partial_in_ns = buf.flush_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
@@ -173,8 +182,52 @@ async def _restore_bytes(
 def _frame_index(frame: Any) -> int:
     """The content-block index for an Anthropic frame, defaulting to 0."""
     if frame.data_obj and isinstance(frame.data_obj.get("index"), int):
-        return frame.data_obj["index"]
+        return int(frame.data_obj["index"])
     return 0
+
+
+def _content_block_stop_index(frame: Any) -> int | None:
+    """If ``frame`` is a ``content_block_stop``, return its index; else None.
+
+    CS-E3: we flush a block's held tail before its stop frame so held text never
+    emits after content_block_stop (ordering corruption).
+    """
+    if (
+        frame.data_obj
+        and isinstance(frame.data_obj.get("type"), str)
+        and frame.data_obj["type"] == "content_block_stop"
+        and isinstance(frame.data_obj.get("index"), int)
+    ):
+        return int(frame.data_obj["index"])
+    return None
+
+
+async def _flush_index(
+    bufs: dict[tuple[int, str], PlaceholderBuffer],
+    index: int,
+    vault: MappingVault,
+    *,
+    suppress_partial: bool,
+) -> AsyncIterator[bytes]:
+    """Drain + flush all buffers for a given content-block ``index``.
+
+    CS-E3: called when a block closes (content_block_stop) so its held tail emits
+    as a delta BEFORE the stop frame. ``suppress_partial`` defers the fail-closed
+    signal to the stream-end flush (a partial mid-stream shouldn't preempt the
+    stop-frame ordering). Buffers for the flushed index are removed so they are
+    not double-flushed at stream end.
+    """
+    to_flush = [(ptr, buf) for (idx, ptr), buf in bufs.items() if idx == index]
+    for pointer, buf in to_flush:
+        try:
+            tail, partial_in_ns = buf.flush_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
+        except Exception as exc:  # noqa: BLE001 - CS-E5
+            msg = f"restore failed during block close: {exc}"
+            raise StreamingError(msg) from exc
+        if tail and not partial_in_ns:
+            yield _tail_delta_bytes(index, pointer, tail)
+        # Remove the flushed buffer so it isn't re-flushed at stream end.
+        bufs.pop((index, pointer), None)
 
 
 def _tail_delta_bytes(index: int, pointer: str, text: str) -> bytes:

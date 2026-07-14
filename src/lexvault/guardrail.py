@@ -364,13 +364,17 @@ class LexVaultGuardrail(CustomGuardrail):
             # failures; a VaultError (or any unexpected error) mid-loop is routed
             # through the same sanitized error frame (CS-E5) rather than aborting
             # the stream with a raw traceback.
+            # Security: the client-facing frame carries a FIXED generic message —
+            # never str(exc), which could embed a placeholder/original if a future
+            # exception echoes request content. The detail is logged server-side.
             logger.error("lexvault: closing stream after restore error: %s", exc)
+            safe_msg = "lexvault: stream restore failed"
             # The Anthropic /v1/messages route yields raw SSE bytes; emit an
             # Anthropic error event there, else an OpenAI-style error chunk.
             if _is_anthropic_messages_route(request_data):
-                yield anthropic_error_event(str(exc))
+                yield anthropic_error_event(safe_msg)
             else:
-                yield openai_error_chunk(str(exc))
+                yield openai_error_chunk(safe_msg)
 
     # ------------------------------------------------------------------ #
     # logging — defense-in-depth re-mask (invariant 19)

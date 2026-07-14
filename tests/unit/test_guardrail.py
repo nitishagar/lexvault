@@ -601,3 +601,30 @@ class TestGuardrailOrdering:
             assert warned == []
         finally:
             litellm.callbacks = prev
+
+
+# --------------------------------------------------------------------------- #
+# CS-E5: streaming iterator hook emits a SANITIZED error frame
+# --------------------------------------------------------------------------- #
+class TestStreamingErrorFrame:
+    async def test_streaming_error_frame_is_sanitized(self, guardrail, tmp_path):
+        """Security: the client-facing error frame on a streaming restore failure
+        carries a FIXED generic message — never str(exc), which could embed a
+        placeholder or original if a future exception echoes request content."""
+        # Force a VaultError mid-stream by replacing the vault's lookup.
+        guardrail._vault._lookup_sync = MagicMock(side_effect=RuntimeError("boom: [LEX-AAAAAAAA]"))
+
+        async def upstream():
+            yield {"delta": {"content": "[LEX-AAAAAAAA]"}}
+
+        out = []
+        async for chunk in guardrail.async_post_call_streaming_iterator_hook(
+            MagicMock(), upstream(), {"messages": []}
+        ):
+            out.append(chunk)
+
+        # The error frame must NOT contain the exception detail (no placeholder).
+        joined = b"".join(c if isinstance(c, bytes) else str(c).encode() for c in out)
+        assert b"[LEX-" not in joined
+        assert b"boom" not in joined
+        assert b"restore failed" in joined  # the generic message

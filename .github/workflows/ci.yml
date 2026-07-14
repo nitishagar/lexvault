@@ -139,7 +139,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system "litellm>=1.80.15"
+          uv pip install --system "litellm[proxy]>=1.80.15"
           uv pip install --system -e .
 
       # CS-D3: boot the real LiteLLM proxy with the lexvault guardrail and curl

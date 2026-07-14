@@ -475,6 +475,37 @@ class TestStreamingRestore:
         assert b"[LEX-AAAAAAAA]" not in out
         await vault.close()
 
+    async def test_bytes_held_tail_emitted_before_content_block_stop(self, tmp_path):
+        """CS-E3 (review fix): a held tool-arg tail must flush as a delta BEFORE
+        the content_block_stop frame, not after it. A small window forces the
+        placeholder to be held in the per-index buffer until the block closes."""
+        vault = MappingVault(tmp_path / "s.db")
+        await vault.assign("default", "[LEX-BBBBBBBB]", "Project Mercury", request_id="r1")
+        delta = f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 2, 'delta': {'type': 'input_json_delta', 'partial_json': '[LEX-BBBBBBBB]'}})}\n\n".encode()
+        stop = b'event: content_block_stop\ndata: {"type":"content_block_stop","index":2}\n\n'
+
+        async def upstream():
+            yield delta
+            yield stop
+
+        # Small window (8) < placeholder (15) so the text is held until block close.
+        out = b"".join(
+            [
+                c
+                async for c in streaming_restore(
+                    upstream(), vault=vault, placeholder_namespace_re=NS, max_placeholder_len=8
+                )
+            ]
+        )
+        # The restored tail delta must come BEFORE content_block_stop.
+        tail_pos = out.find(b"Project Mercury")
+        stop_pos = out.find(b"content_block_stop")
+        assert tail_pos >= 0, "restored tail must be emitted"
+        assert stop_pos >= 0, "content_block_stop must be present"
+        assert tail_pos < stop_pos, "held tail must precede content_block_stop"
+        assert b"[LEX-BBBBBBBB]" not in out
+        await vault.close()
+
     async def test_bytes_split_across_frames(self, tmp_path):
         """A placeholder whose frame is split across two raw byte yields restores."""
         vault = MappingVault(tmp_path / "s.db")
