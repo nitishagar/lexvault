@@ -93,6 +93,14 @@ model verbatim for instruction (documented risk).
 Default: `[]`. Additional regex terms (merged with any `regex_terms` in the
 dictionary file). Each entry: `{name, pattern, type, case_sensitive}`.
 
+### Base-class mask flags (`mask_request_content` / `mask_response_content`)
+{: data-toc-omit }
+
+The LiteLLM `CustomGuardrail` base class exposes `mask_request_content` and
+`mask_response_content` boolean knobs. lexvault **ignores these** — it always
+masks/restores based on its own hook implementations (invariant 4: lexvault
+does not define `apply_guardrail`). Setting either flag has no effect.
+
 ## Per-request overrides
 
 See [integration → per-request config](integration.md#per-request-config) for

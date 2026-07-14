@@ -97,3 +97,8 @@ placeholder-namespace spans from detection. No double-masking, no nesting.
 - **Vault growth** — mappings persist (no TTL in v0.1), so the vault grows over
   time bounded by distinct terms × requests. A future cleanup/TTL pass is on the
   roadmap.
+- **Homonym collision (CS-C12)** — if a dictionary term is identical to a
+  placeholder codename AND a common word, the leftmost-longest match can produce
+  ambiguous behavior. This is inherently out of v0.1 scope; the dictionary is
+  trusted to contain distinct enterprise terms. Document this as a known
+  limitation if it applies to your dictionary.

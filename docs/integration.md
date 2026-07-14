@@ -134,3 +134,15 @@ LiteLLM emits it to Langfuse/DataDog/OTel — originals never appear in logs, ev
 on the spend-logging path. This is defense-in-depth: the request is already
 masked by `pre_call`, but the logging hook guards against any path that re-reads
 raw kwargs/results.
+
+**Fail-open by design (CS-E9):** the logging hook itself fails *open* — if its
+re-mask raises, the un-re-masked payload is returned rather than crashing the
+call. This is a deliberate never-crash tradeoff: the request is already masked
+by `pre_call`, so a logging-hook failure cannot leak an original on the request
+path (only a defense-in-depth layer is skipped). It is strictly weaker than
+fail-closed masking, but crashing the proxy on a logging error is worse.
+
+**Deferred-logging dedup (CS-C9):** on LiteLLM ≥1.83, the logging hook is
+invoked with a deduplicated payload (LiteLLM avoids double-logging the same
+event); on earlier versions it may fire twice. Both are benign — re-masking is
+idempotent.
