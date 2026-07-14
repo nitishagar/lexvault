@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from lexvault.streaming.buffer import PlaceholderBuffer
-from lexvault.streaming.reframer import SseReframer, extract_frame_text
+from lexvault.streaming.reframer import SseReframer, extract_frame_text, restore_frame_text
 from lexvault.vault import MappingVault
 
 __all__ = ["streaming_restore", "StreamingError"]
@@ -103,40 +103,101 @@ async def _restore_bytes(
     namespace_re: str,
     window: int,
 ) -> AsyncIterator[bytes]:
+    """Restore placeholders in an Anthropic raw-SSE-bytes stream, IN PLACE.
+
+    CS-E3: each frame is restored preserving its delta type (text_delta stays
+    text_delta, thinking_delta stays thinking_delta, input_json_delta stays
+    input_json_delta) and its content-block index, and structural frames
+    (content_block_start/stop, message_start/stop, ping) pass through in order.
+    A placeholder can straddle frames within the SAME (index, type), so we keep
+    a per-(index, json-pointer) PlaceholderBuffer — text never crosses into
+    thinking or tool-arg frames, so type fidelity is preserved.
+    """
     reframer = SseReframer()
-    buf = PlaceholderBuffer(window, namespace_re)
-    last_index = 0
+    bufs: dict[tuple[int, str], PlaceholderBuffer] = {}
+    # Track whether ANY buffer ended mid-placeholder → fail-closed signal.
+    had_partial = False
+
+    def _buf_for(index: int, pointer: str) -> PlaceholderBuffer:
+        key = (index, pointer)
+        b = bufs.get(key)
+        if b is None:
+            b = PlaceholderBuffer(window, namespace_re)
+            bufs[key] = b
+        return b
 
     async for raw in upstream:
         reframer.feed(bytes(raw))
         for frame in reframer.drain_complete():
             slots = extract_frame_text(frame)
             if not slots:
-                # Non-restorable frame (signature_delta, message_delta, ping) —
-                # flush any restored text first, then pass through verbatim.
-                ready = buf.drain_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
-                if ready:
-                    yield _text_delta_bytes(ready, last_index)
+                # Non-restorable frame (signature_delta, message_delta, ping) or
+                # a content_block_start with empty/non-text content. Pass through
+                # verbatim so structural ordering + block lifecycle is preserved.
+                # CS-E3: this keeps empty-text content_block_start alive.
                 yield frame.raw
-                # Track the content-block index for re-emitted text deltas.
-                if frame.data_obj and isinstance(frame.data_obj.get("index"), int):
-                    last_index = frame.data_obj["index"]
                 continue
-            # Accumulate ALL extracted text; the buffer restores complete
-            # placeholders and only emits text past the placeholder boundary.
-            for _pointer, text in slots:
+            # Restore each slot's text through its own (index, pointer) buffer so
+            # a placeholder split across frames of the same type/index reassembles,
+            # and write the restored text back into THIS frame in place.
+            restorations: dict[str, str] = {}
+            for pointer, text in slots:
+                index = _frame_index(frame)
+                buf = _buf_for(index, pointer)
                 buf.feed(text)
-            ready = buf.drain_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
-            if ready:
-                yield _text_delta_bytes(ready, last_index)
+                try:
+                    ready = buf.drain_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
+                except Exception as exc:  # noqa: BLE001 - CS-E5: route to error frame
+                    msg = f"restore failed mid-stream: {exc}"
+                    raise StreamingError(msg) from exc
+                restorations[pointer] = ready  # may be "" if the window holds it
+            yield restore_frame_text(frame, restorations)
 
-    # Flush on stream end — restore complete placeholders in the held tail.
-    tail, partial_in_ns = buf.flush_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
-    if tail:
-        yield _text_delta_bytes(tail, last_index)
-    if partial_in_ns:
+    # Flush every per-(index,type) buffer on stream end.
+    for (index, pointer), buf in bufs.items():
+        try:
+            tail, partial_in_ns = buf.flush_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
+        except Exception as exc:  # noqa: BLE001 - CS-E5
+            msg = f"restore failed during stream flush: {exc}"
+            raise StreamingError(msg) from exc
+        if partial_in_ns:
+            had_partial = True
+        if tail and not partial_in_ns:
+            # Emit a final delta of the matching type for the held tail.
+            yield _tail_delta_bytes(index, pointer, tail)
+    if had_partial:
         msg = "stream ended with a dangling partial placeholder"
         raise StreamingError(msg)
+
+
+def _frame_index(frame: Any) -> int:
+    """The content-block index for an Anthropic frame, defaulting to 0."""
+    if frame.data_obj and isinstance(frame.data_obj.get("index"), int):
+        return frame.data_obj["index"]
+    return 0
+
+
+def _tail_delta_bytes(index: int, pointer: str, text: str) -> bytes:
+    """Re-emit a held-tail restore as a delta frame matching ``pointer``'s type.
+
+    CS-E3: preserves the delta type so a thinking tail stays thinking, a
+    tool-arg tail stays input_json_delta, and a text tail stays text_delta.
+    """
+    if pointer == "delta.thinking":
+        delta: dict = {"type": "thinking_delta", "thinking": text}
+    elif pointer == "delta.partial_json":
+        delta = {"type": "input_json_delta", "partial_json": text}
+    elif pointer in ("content_block.text", "content_block.thinking"):
+        # content_block_start tail: the block already opened; emit a delta of
+        # the matching type (text_delta / thinking_delta).
+        is_thinking = pointer.endswith("thinking")
+        kind = "thinking_delta" if is_thinking else "text_delta"
+        field = "thinking" if is_thinking else "text"
+        delta = {"type": kind, field: text}
+    else:
+        delta = {"type": "text_delta", "text": text}
+    payload = {"type": "content_block_delta", "index": index, "delta": delta}
+    return f"event: content_block_delta\ndata: {json.dumps(payload)}\n\n".encode()
 
 
 def _text_delta_bytes(text: str, index: int) -> bytes:
@@ -162,33 +223,62 @@ async def _restore_objects(
     """Restore text in parsed streaming objects (OpenAI ModelResponseStream deltas).
 
     A placeholder can span multiple delta chunks, so we accumulate the text
-    stream, hold back the trailing window (≤ longest placeholder), restore whole
-    placeholders, and re-emit as chunks. This satisfies invariant 5 (bounded
-    buffering) and invariant 1 (a split placeholder still restores).
+    stream, hold back the trailing window (≤ longest placeholder), and restore
+    whole placeholders. This satisfies invariant 5 (bounded buffering) and
+    invariant 1 (a split placeholder still restores).
+
+    CS-E6: we MUTATE the original chunk objects in place — writing restored text
+    into each chunk's delta content — instead of synthesizing SimpleNamespace
+    chunks. This preserves the ``ModelResponseStream`` metadata (id/model/
+    created/object/finish_reason) that LiteLLM's proxy serializer relies on, and
+    handles all choices. Restored text is carried in a pending buffer between
+    chunks (the window may delay a placeholder's restore past its source chunk).
     """
     buf = PlaceholderBuffer(window, namespace_re)
+    pending = ""  # restored text not yet written into a yielded chunk
 
     async for chunk in upstream:
         slots = _extract_object_text(chunk)
+        # Feed this chunk's text into the restore buffer; accumulate what's
+        # ready (restored) into the pending string.
+        chunk_text = "".join(getter() for getter, _ in slots)
+        if chunk_text:
+            buf.feed(chunk_text)
+        ready = buf.drain_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
+        if ready:
+            pending += ready
+
         if not slots:
-            # Non-text chunk (e.g. usage/finish) — flush restored text first so we
-            # don't reorder, then pass the chunk through verbatim.
-            ready = buf.drain_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
-            if ready:
-                yield _make_text_chunk(ready)
+            # Non-text chunk (usage/finish): pass through verbatim. Its text
+            # (already restored into `pending`) is written to the NEXT content
+            # chunk, preserving ordering. Yield the original non-text chunk.
             yield chunk
             continue
 
-        chunk_text = "".join(getter() for getter, _ in slots)
-        buf.feed(chunk_text)
-        ready = buf.drain_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
-        if ready:
-            yield _make_text_chunk(ready)
+        # Write the pending restored text into this chunk's slots (mutating in
+        # place across ALL choices), then yield the original chunk. Empty
+        # pending means the window is still holding this chunk's text; we still
+        # yield the chunk with its content cleared so the stream isn't reordered
+        # and metadata reaches the client. The held text restores on a later chunk.
+        _write_object_slots(slots, pending)
+        pending = ""
+        yield chunk
 
     # Flush the held window on stream end.
-    tail, partial_in_ns = buf.flush_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
-    if tail:
-        yield _make_text_chunk(tail)
+    # CS-E5: route a VaultError through the error-frame path.
+    try:
+        tail, partial_in_ns = buf.flush_restored_with_vault(vault._lookup_sync)  # noqa: SLF001
+    except Exception as exc:  # noqa: BLE001 - route any restore error to error-frame path
+        msg = f"restore failed during stream flush: {exc}"
+        raise StreamingError(msg) from exc
+    final_text = pending + (tail if not partial_in_ns else "")
+    # CS-E2: never yield a dangling partial placeholder (partial_in_ns suppresses tail).
+    if final_text:
+        # No further content chunk to mutate — synthesize one carrying the
+        # restored tail. This is the only synthesized chunk and only on stream
+        # end, so metadata loss here is unavoidable and acceptable (the upstream
+        # stream is done; no original chunk remains to carry the tail).
+        yield _make_text_chunk(final_text)
     if partial_in_ns:
         msg = "stream ended with a dangling partial placeholder"
         raise StreamingError(msg)
@@ -197,18 +287,22 @@ async def _restore_objects(
 def _extract_object_text(chunk: Any) -> list[tuple[Any, Any]]:
     """Return [(getter, setter)] callables for each restorable text field in ``chunk``.
 
-    Handles OpenAI ``ModelResponseStream`` (``choices[0].delta.content`` as str)
-    and best-effort ``ResponsesAPIStreamingResponse`` shapes.
+    Handles OpenAI ``ModelResponseStream`` (``choices[].delta.content`` as str)
+    and best-effort ``ResponsesAPIStreamingResponse`` shapes. CS-E6: ALL choices
+    are walked (not just ``choices[0]``).
     """
     slots: list[tuple[Any, Any]] = []
 
     choices = getattr(chunk, "choices", None)
     if isinstance(choices, list) and choices:
-        delta = getattr(choices[0], "delta", None)
-        if delta is not None:
-            content = getattr(delta, "content", None)
-            if isinstance(content, str) and content:
-                slots.append(_make_attr_slot(delta, "content"))
+        for choice in choices:
+            delta = getattr(choice, "delta", None)
+            if delta is not None:
+                content = getattr(delta, "content", None)
+                # Include empty-string content too so we can write restored text
+                # into it; only skip when there is no delta.content attribute.
+                if isinstance(content, str):
+                    slots.append(_make_attr_slot(delta, "content"))
 
     if isinstance(chunk, dict):
         delta = chunk.get("delta")
@@ -218,6 +312,21 @@ def _extract_object_text(chunk: Any) -> list[tuple[Any, Any]]:
             slots.append(_make_dict_slot(chunk, "text"))
 
     return slots
+
+
+def _write_object_slots(slots: list[tuple[Any, Any]], text: str) -> None:
+    """Write restored ``text`` into ``slots``, mutating objects in place (CS-E6).
+
+    All restored text goes into the FIRST slot (the client concatenates delta
+    contents in order). Remaining content slots are cleared (their text was
+    already fed to the restore buffer and will re-emerge on a later chunk).
+    """
+    if not slots:
+        return
+    first_getter, first_setter = slots[0]
+    first_setter(text)
+    for _getter, setter in slots[1:]:
+        setter("")
 
 
 def _make_attr_slot(obj: Any, attr: str) -> tuple[Any, Any]:

@@ -383,6 +383,98 @@ class TestStreamingRestore:
         assert b"[LEX-CCCCCCCC]" not in out
         await vault.close()
 
+    async def test_bytes_thinking_delta_stays_thinking_type(self, tmp_path):
+        """CS-E3: a codename in a thinking_delta restores but the frame stays
+        ``thinking_delta`` (not converted to a ``text_delta``). Type fidelity."""
+        vault = MappingVault(tmp_path / "s.db")
+        await vault.assign("default", "[LEX-CCCCCCCC]", "Project Mercury", request_id="r1")
+        payload = {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "thinking_delta", "thinking": "plan [LEX-CCCCCCCC] done"},
+        }
+        chunk = f"event: content_block_delta\ndata: {json.dumps(payload)}\n\n".encode()
+
+        async def upstream():
+            yield chunk
+
+        out = b"".join(
+            [
+                c
+                async for c in streaming_restore(
+                    upstream(), vault=vault, placeholder_namespace_re=NS, max_placeholder_len=WINDOW
+                )
+            ]
+        )
+        # The restored frame must still be a thinking_delta carrying the original.
+        assert b'"thinking_delta"' in out
+        assert b'"text_delta"' not in out
+        assert b"Project Mercury" in out
+        assert b"[LEX-CCCCCCCC]" not in out
+        await vault.close()
+
+    async def test_bytes_input_json_delta_restored_in_place(self, tmp_path):
+        """CS-E3: tool-call partial_json (input_json_delta) restores in place as
+        input_json_delta, not converted to text. Tool args stay tool args."""
+        vault = MappingVault(tmp_path / "s.db")
+        await vault.assign("default", "[LEX-BBBBBBBB]", "Project Mercury", request_id="r1")
+        payload = {
+            "type": "content_block_delta",
+            "index": 2,
+            "delta": {"type": "input_json_delta", "partial_json": '{"q":"[LEX-BBBBBBBB]"}'},
+        }
+        chunk = f"event: content_block_delta\ndata: {json.dumps(payload)}\n\n".encode()
+
+        async def upstream():
+            yield chunk
+
+        out = b"".join(
+            [
+                c
+                async for c in streaming_restore(
+                    upstream(), vault=vault, placeholder_namespace_re=NS, max_placeholder_len=WINDOW
+                )
+            ]
+        )
+        assert b'"input_json_delta"' in out
+        assert b'"partial_json"' in out
+        assert b'"text_delta"' not in out
+        assert b"Project Mercury" in out
+        assert b"[LEX-BBBBBBBB]" not in out
+        await vault.close()
+
+    async def test_bytes_empty_text_content_block_start_survives(self, tmp_path):
+        """CS-E3: a content_block_start with empty text:"" must pass through
+        (not be dropped as non-restorable). Every normal text stream starts
+        with one; dropping it corrupts the stream."""
+        vault = MappingVault(tmp_path / "s.db")
+        await vault.assign("default", "[LEX-AAAAAAAA]", "Project Titan", request_id="r1")
+        start = (
+            b'event: content_block_start\ndata: {"type":"content_block_start","index":0,'
+            b'"content_block":{"type":"text","text":""}}\n\n'
+        )
+        delta = f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': '[LEX-AAAAAAAA]'}})}\n\n".encode()
+        stop = b'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+
+        async def upstream():
+            yield start + delta + stop
+
+        out = b"".join(
+            [
+                c
+                async for c in streaming_restore(
+                    upstream(), vault=vault, placeholder_namespace_re=NS, max_placeholder_len=WINDOW
+                )
+            ]
+        )
+        # The empty-text content_block_start MUST appear in the restored stream.
+        assert b"content_block_start" in out
+        assert b'"text": ""' in out or b'"text":""' in out
+        assert b"content_block_stop" in out
+        assert b"Project Titan" in out
+        assert b"[LEX-AAAAAAAA]" not in out
+        await vault.close()
+
     async def test_bytes_split_across_frames(self, tmp_path):
         """A placeholder whose frame is split across two raw byte yields restores."""
         vault = MappingVault(tmp_path / "s.db")
@@ -452,6 +544,70 @@ class TestStreamingRestore:
                 pass
         await vault.close()
 
+    async def test_stream_ending_mid_placeholder_yields_no_partial(self, tmp_path):
+        """CS-E2: a dangling partial placeholder at stream end must NOT appear in
+        the yielded output before the error frame — the tail is suppressed so no
+        partial placeholder can reach the client. Asserts on collected chunks."""
+        vault = MappingVault(tmp_path / "s.db")
+
+        async def upstream():
+            yield (
+                b"event: content_block_delta\ndata: "
+                + json.dumps(
+                    {
+                        "type": "content_block_delta",
+                        "delta": {"type": "text_delta", "text": "ending [LEX-AAA"},
+                    }
+                ).encode()
+                + b"\n\n"
+            )
+
+        out = []
+        with pytest.raises(StreamingError):
+            async for c in streaming_restore(
+                upstream(), vault=vault, placeholder_namespace_re=NS, max_placeholder_len=WINDOW
+            ):
+                out.append(c)
+        # The dangling partial placeholder '[LEX-AAA' must not be in any frame
+        # yielded to the client before the error frame.
+        joined = b"".join(out)
+        assert b"[LEX-AAA" not in joined
+        assert b"[LEX-" not in joined
+        await vault.close()
+
+    async def test_vault_error_mid_stream_raises_streaming_error(self, tmp_path):
+        """CS-E5: a VaultError raised by the vault during restore must surface as
+        StreamingError (routing through the error-frame path), not propagate raw
+        as an unhandled exception that aborts the stream without a sanitized frame."""
+
+        class _ExplodingVault:
+            """Stand-in for a MappingVault whose _lookup_sync raises mid-stream."""
+
+            def _lookup_sync(self, _placeholder: str) -> str | None:  # noqa: SLF001
+                raise RuntimeError("vault unavailable")
+
+        async def upstream():
+            # A frame with a real placeholder; restore calls _lookup_sync → raise.
+            yield (
+                b"event: content_block_delta\ndata: "
+                + json.dumps(
+                    {
+                        "type": "content_block_delta",
+                        "delta": {"type": "text_delta", "text": "see [LEX-AAAAAAAA] now"},
+                    }
+                ).encode()
+                + b"\n\n"
+            )
+
+        with pytest.raises(StreamingError):
+            async for _ in streaming_restore(
+                upstream(),
+                vault=_ExplodingVault(),  # type: ignore[arg-type]
+                placeholder_namespace_re=NS,
+                max_placeholder_len=WINDOW,
+            ):
+                pass
+
     async def test_parsed_object_regime_restores_delta_content(self, tmp_path):
         """OpenAI ModelResponseStream-style chunks (objects) are restored."""
         vault = MappingVault(tmp_path / "s.db")
@@ -483,6 +639,66 @@ class TestStreamingRestore:
         combined = "".join(c.choices[0].delta.content for c in out if c.choices[0].delta.content)
         assert "Project Titan" in combined
         assert "[LEX-" not in combined
+        await vault.close()
+
+    async def test_parsed_regime_preserves_chunk_metadata_and_identity(self, tmp_path):
+        """CS-E6: restore MUTATES the original ModelResponseStream chunks in place
+        (preserving id/model/created/finish_reason and chunk identity), instead of
+        synthesizing SimpleNamespace chunks that drop metadata. Multiple chunks
+        are split so a placeholder straddles the chunk boundary."""
+        vault = MappingVault(tmp_path / "s.db")
+        await vault.assign("default", "[LEX-EEEEEEEE]", "Project Titan", request_id="r1")
+
+        class Delta:
+            def __init__(self, content: str) -> None:
+                self.content = content
+
+        class Choice:
+            def __init__(self, content: str, finish_reason=None) -> None:
+                self.delta = Delta(content)
+                self.finish_reason = finish_reason
+
+        class Chunk:
+            def __init__(self, content: str, *, cid: str, model: str, fr=None) -> None:
+                self.id = cid
+                self.model = model
+                self.created = 1700000000
+                self.object = "chat.completion.chunk"
+                self.choices = [Choice(content, fr)]
+
+        placeholder = "[LEX-EEEEEEEE]"
+        c1 = Chunk("see " + placeholder[:4], cid="ch1", model="gpt-4o")
+        c2 = Chunk(placeholder[4:] + " now", cid="ch2", model="gpt-4o", fr="stop")
+        originals = [c1, c2]
+
+        async def upstream():
+            yield c1
+            yield c2
+
+        out = [
+            c
+            async for c in streaming_restore(
+                upstream(), vault=vault, placeholder_namespace_re=NS, max_placeholder_len=WINDOW
+            )
+        ]
+        # Combined restored content is correct.
+        combined = "".join(getattr(c.choices[0].delta, "content", "") for c in out if c.choices)
+        assert "Project Titan" in combined
+        assert placeholder not in combined
+
+        # CS-E6: every emitted content chunk is one of the ORIGINAL chunk objects
+        # (mutated in place), not a synthesized SimpleNamespace — so the client's
+        # proxy serialization keeps id/model/created/object/finish_reason.
+        emitted_originals = [
+            c for c in out if getattr(c, "object", None) == "chat.completion.chunk"
+        ]
+        assert emitted_originals, "expected original ModelResponseStream chunks to be emitted"
+        for c in emitted_originals:
+            assert c in originals
+            assert c.model == "gpt-4o"
+            assert c.created == 1700000000
+        # The final chunk's finish_reason is preserved.
+        assert any(c.choices[0].finish_reason == "stop" for c in emitted_originals if c.choices)
         await vault.close()
 
 

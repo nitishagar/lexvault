@@ -32,12 +32,12 @@ class PlaceholderBuffer:
 
     Usage (streaming restore)::
 
-        buf = PlaceholderBuffer(window, namespace_re, vault)
+        buf = PlaceholderBuffer(window, namespace_re)
         for chunk in chunks:
             buf.feed(chunk_text)
-            yield from buf.drain_restored()  # text safe to emit now
-        tail = buf.flush()  # final text on stream end
-        if buf.partial_in_namespace:  # dangling partial → fail closed
+            yield buf.drain_restored_with_vault(vault._lookup_sync)  # safe text
+        tail, partial = buf.flush_restored_with_vault(vault._lookup_sync)
+        if partial:  # dangling partial → fail closed
             ...
     """
 
@@ -54,29 +54,6 @@ class PlaceholderBuffer:
         """Append text to the accumulated stream."""
         if text:
             self._buf += text
-
-    def drain_restored(self, restore: re.Pattern[str] | None = None) -> str:
-        """Return text that is safe to emit now, with complete placeholders restored.
-
-        We hold back the trailing ``<= window`` chars (which may contain a partial
-        placeholder). The rest — everything that has provably left any placeholder
-        boundary — is restored and returned. ``restore`` is unused (kept for API
-        symmetry); the namespace regex from construction is used.
-        """
-        del restore  # unused; namespace regex is from __init__
-        if len(self._buf) <= self._window:
-            return ""  # not enough to be sure the tail isn't a partial
-        # Emit everything except the trailing window; keep the window buffered so
-        # a placeholder straddling the cut is never split.
-        cut = len(self._buf) - self._window
-        ready, self._buf = self._buf[:cut], self._buf[cut:]
-        # The ready portion is guaranteed not to end mid-placeholder (the held
-        # window absorbs any partial), but it MAY contain complete placeholders
-        # that straddle into the now-emitted region from earlier. We restore
-        # complete placeholders here. Any placeholder that starts in `ready` and
-        # would end in the held window is NOT in `ready` (we cut before it), so
-        # unmask only sees complete placeholders. This is the correctness core.
-        return _restore_inplace(ready, self._ns_re, _noop_lookup)
 
     def drain_restored_with_vault(self, lookup: Lookup) -> str:
         """Emit text that has provably left any placeholder boundary, restored.
@@ -221,11 +198,6 @@ def _restore_inplace(text: str, ns_re: re.Pattern[str], lookup: Lookup) -> str:
         return text
     out.append(text[cursor:])
     return "".join(out)
-
-
-def _noop_lookup(_placeholder: str) -> str | None:
-    """A lookup that resolves nothing (used by drain_restored's no-vault path)."""
-    return None
 
 
 def _leading_literal(regex_pattern: str) -> str:

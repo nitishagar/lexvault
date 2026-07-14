@@ -117,11 +117,54 @@ def _make_system_str_slot(data: dict) -> TextSlot:
 
 
 def _dict_str_value_slots(d: dict) -> list[TextSlot]:
+    """Slots for every STRING value in ``d``, recursing into nested dicts/lists.
+
+    CS-E4 / invariant 8 edge: a term can appear at any nesting depth in a
+    ``tool_use.input`` (e.g. ``{"a": {"b": {"c": "Project Titan"}}}`` or inside
+    a list). We walk the full JSON value tree and surface a mutable slot for
+    each leaf string, so masking reaches terms at every depth — not just the
+    top-level values.
+    """
     slots: list[TextSlot] = []
     for k, v in list(d.items()):
-        if isinstance(v, str):
-            slots.append(_make_dict_slot(d, k))
+        slots.extend(_value_slots(d, k, v))
     return slots
+
+
+def _value_slots(container: dict | list, key: Any, value: Any) -> list[TextSlot]:
+    """Slots for ``container[key] = value``, recursing into containers."""
+    if isinstance(value, str):
+        if value:
+            return [_slot_for(container, key)]
+        return []
+    if isinstance(value, dict):
+        # Recurse into nested dict: each nested key gets its own slot so the
+        # original container tree is mutated in place (no copy/replace).
+        slots: list[TextSlot] = []
+        for nk, nv in list(value.items()):
+            slots.extend(_value_slots(value, nk, nv))
+        return slots
+    if isinstance(value, list):
+        slots = []
+        for idx, item in enumerate(value):
+            slots.extend(_value_slots(value, idx, item))
+        return slots
+    return []
+
+
+def _slot_for(container: dict | list, key: Any) -> TextSlot:
+    """A getter/setter for ``container[key]`` (works for dict keys and list idx)."""
+    if isinstance(container, dict):
+        return _make_dict_slot(container, key)
+
+    # list element
+    def getter() -> str:
+        return str(container[key])
+
+    def setter(val: str) -> None:
+        container[key] = val
+
+    return getter, setter
 
 
 def _make_dict_slot(d: dict, key: str) -> TextSlot:

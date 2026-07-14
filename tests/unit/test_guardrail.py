@@ -10,6 +10,7 @@ guardrail-test pattern). Pins IMPLICIT_SPEC invariants:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -200,6 +201,37 @@ class TestAnthropicRoundTrip:
         response = SimpleNamespace(content=[resp_block], model="claude-3")
         await guardrail.async_post_call_success_hook(data, MagicMock(), response)
         assert resp_block.input["project"] == "Project Titan"
+
+    async def test_mask_nested_anthropic_tool_use_input(self, guardrail):
+        """CS-E4 / invariant 8 edge: a term nested inside tool_use.input values
+        (dict/list nesting) is masked, not just top-level string values."""
+        data = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "q",
+                            "input": {
+                                "a": {"b": {"c": "Project Titan"}},  # deeply nested dict
+                                "d": ["Project Titan", "x"],  # list of strings
+                                "e": [{"f": "Project Titan"}],  # list of dicts
+                            },
+                        }
+                    ],
+                }
+            ],
+            "litellm_call_id": "req-nested",
+        }
+        rendered = json.dumps(data)
+        assert "Project Titan" in rendered  # precondition
+        await guardrail.async_pre_call_hook(MagicMock(), MagicMock(), data, "anthropic_messages")
+        # Every nested occurrence masked.
+        after = json.dumps(data)
+        assert "Project Titan" not in after
+        assert after.count("[LEX-") >= 3
 
 
 # --------------------------------------------------------------------------- #
@@ -413,3 +445,53 @@ class TestMissingCallId:
         await guardrail.async_post_call_success_hook(data, MagicMock(), response)
         assert "Project Titan" in message.content
         assert "[LEX-" not in message.content
+
+
+# --------------------------------------------------------------------------- #
+# CS-E7/C6 (invariant 18): guardrail-ordering startup warning
+# --------------------------------------------------------------------------- #
+class TestGuardrailOrdering:
+    async def test_warns_when_one_way_masker_precedes_lexvault(self, guardrail, caplog):
+        """A one-way MASK guardrail registered before lexvault triggers ONE warning."""
+        import litellm
+
+        class _FakeContentFilter:
+            guardrail_name = "litellm_content_filter"
+
+        class _FakeOther:
+            guardrail_name = "some_other_guardrail"
+
+        prev = list(getattr(litellm, "callbacks", []))
+        try:
+            litellm.callbacks = [_FakeContentFilter(), _FakeOther(), guardrail]
+            with caplog.at_level("WARNING"):
+                data = {"messages": [{"role": "user", "content": "Project Titan"}]}
+                # First call triggers the lazy ordering check.
+                await guardrail.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+                # Second call must NOT warn again (once-only).
+                data2 = {"messages": [{"role": "user", "content": "Project Titan"}]}
+                await guardrail.async_pre_call_hook(MagicMock(), MagicMock(), data2, "completion")
+            warned = [r for r in caplog.records if "one-way MASK guardrail" in r.message]
+            assert len(warned) == 1
+            assert "content_filter" in warned[0].message
+            assert "FIRST" in warned[0].message
+        finally:
+            litellm.callbacks = prev
+
+    async def test_no_warning_when_lexvault_is_first(self, guardrail, caplog):
+        import litellm
+
+        class _FakeOther:
+            guardrail_name = "some_other_guardrail"
+
+        prev = list(getattr(litellm, "callbacks", []))
+        try:
+            litellm.callbacks = [guardrail, _FakeOther()]
+            guardrail._ordering_warned = False
+            with caplog.at_level("WARNING"):
+                data = {"messages": [{"role": "user", "content": "Project Titan"}]}
+                await guardrail.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+            warned = [r for r in caplog.records if "one-way MASK guardrail" in r.message]
+            assert warned == []
+        finally:
+            litellm.callbacks = prev

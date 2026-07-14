@@ -40,7 +40,6 @@ from lexvault.engine import mask as engine_mask
 from lexvault.engine import unmask as engine_unmask
 from lexvault.logging import remask_logging_payload
 from lexvault.streaming.restore import (
-    StreamingError,
     anthropic_error_event,
     openai_error_chunk,
     streaming_restore,
@@ -84,6 +83,17 @@ _ANTHROPIC_CALL_TYPES = frozenset({"anthropic_messages"})
 # Call types for the Responses API.
 _RESPONSES_CALL_TYPES = frozenset({"responses", "aresponses"})
 
+# Known one-way MASK guardrails that, if listed BEFORE lexvault, can destroy a
+# term lexvault intended to reversibly map (invariant 18). Matched by substring
+# on the guardrail's class name / registered name.
+_ONE_WAY_MASKERS = (
+    "content_filter",  # litellm_content_filter with action: MASK
+    "presidio",
+    "google_text_moderation",
+    "llamaguard",
+    "aim",
+)
+
 
 class LexVaultGuardrail(CustomGuardrail):
     """Reversible proprietary-term pseudonymization guardrail for LiteLLM.
@@ -105,6 +115,12 @@ class LexVaultGuardrail(CustomGuardrail):
         self.guardrail_name = guardrail_name
         self._config = self._build_config(kwargs)
         self._detector = self._build_detector(self._config)
+        # CS-E7/C6 (invariant 18): one-time guardrail-ordering warning, checked
+        # lazily on the first pre_call (the guardrail can't see co-configured
+        # guardrails at __init__ — litellm.callbacks is populated after all
+        # guardrails register). Warns once if a one-way MASK guardrail precedes
+        # lexvault in the callback list, which can defeat reversibility.
+        self._ordering_warned = False
         self._vault = MappingVault(self._config.vault_path)
         # Pre-compute the namespace regex + max placeholder length for streaming.
         self._namespace_re = self._config.placeholder_namespace_pattern()
@@ -160,6 +176,46 @@ class LexVaultGuardrail(CustomGuardrail):
         suffix_len = len("-9999")
         return static_len + code_len + suffix_len
 
+    def _warn_on_guardrail_ordering(self) -> None:
+        """CS-E7/C6 (invariant 18): warn once if a one-way MASK guardrail that
+        could destroy a masked term is registered BEFORE lexvault.
+
+        LiteLLM runs guardrails in config-list order; a one-way masker preceding
+        lexvault can obscure a dictionary term before lexvault maps it, defeating
+        reversibility. The guardrail can't see its siblings at ``__init__`` time
+        (``litellm.callbacks`` is populated after all guardrails register), so we
+        check lazily on the first ``pre_call``. Best-effort: never blocks.
+        """
+        try:
+            import litellm
+
+            callbacks = getattr(litellm, "callbacks", None)
+            if not isinstance(callbacks, list):
+                return
+            self_index = None
+            for idx, cb in enumerate(callbacks):
+                if cb is self:
+                    self_index = idx
+                    break
+            if self_index is None or self_index == 0:
+                return  # lexvault is first (or not yet registered) — fine.
+            preceding = callbacks[:self_index]
+            names = [
+                str(getattr(cb, "guardrail_name", "") or type(cb).__name__).lower()
+                for cb in preceding
+            ]
+            risky = [n for n in names if any(m in n for m in _ONE_WAY_MASKERS)]
+            if risky:
+                logger.warning(
+                    "lexvault: a one-way MASK guardrail (%s) runs before lexvault. "
+                    "List lexvault FIRST in your guardrails config so dictionary "
+                    "terms are reversibly masked before any one-way masker can "
+                    "destroy them (invariant 18).",
+                    ", ".join(sorted(set(risky))),
+                )
+        except Exception:  # noqa: BLE001 - ordering check must never break the call
+            return
+
     # ------------------------------------------------------------------ #
     # pre_call — MASK (invariant 11: fail-closed by default)
     # ------------------------------------------------------------------ #
@@ -176,6 +232,11 @@ class LexVaultGuardrail(CustomGuardrail):
 
         if not isinstance(data, dict):
             return None
+
+        # CS-E7/C6 (invariant 18): one-time guardrail-ordering warning.
+        if not self._ordering_warned:
+            self._ordering_warned = True
+            self._warn_on_guardrail_ordering()
 
         req_id = data.get("litellm_call_id") or str(uuid.uuid4())
         per_req = _per_request_config(data)
@@ -297,8 +358,12 @@ class LexVaultGuardrail(CustomGuardrail):
                 max_placeholder_len=self._max_placeholder_len,
             ):
                 yield chunk
-        except StreamingError as exc:
-            # Fail closed: emit one error frame, then stop. Never yield a partial placeholder.
+        except Exception as exc:
+            # Fail closed: emit one error frame, then stop. Never yield a partial
+            # placeholder. StreamingError covers dangling-partial + restore-flush
+            # failures; a VaultError (or any unexpected error) mid-loop is routed
+            # through the same sanitized error frame (CS-E5) rather than aborting
+            # the stream with a raw traceback.
             logger.error("lexvault: closing stream after restore error: %s", exc)
             # The Anthropic /v1/messages route yields raw SSE bytes; emit an
             # Anthropic error event there, else an OpenAI-style error chunk.
