@@ -1,0 +1,23 @@
+# LiteLLM proxy config for the CI end-to-end smoke job (CS-D3).
+#
+# Same guardrail block SHAPE as examples/config.yaml (guardrail_name top-level;
+# guardrail/mode/default_on + lexvault params inside litellm_params) but pointed
+# at localhost + repo-relative paths so it boots in CI without Docker.
+
+model_list:
+  - model_name: fake
+    litellm_params:
+      model: openai/fake
+      api_key: fake-key
+      api_base: http://127.0.0.1:8000
+
+guardrails:
+  - guardrail_name: lexvault
+    litellm_params:
+      guardrail: lexvault_shim.LexVaultGuardrail
+      mode: [pre_call, post_call]
+      default_on: true
+      dictionary_path: dictionary.yaml  # resolved relative to cwd (run from examples/)
+      org_key: ci-not-secret-org-key
+      scope: default
+      fail_open: false

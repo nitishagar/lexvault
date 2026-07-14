@@ -16,15 +16,19 @@ model_list:
       api_base: http://fake-backend:8000
 
 guardrails:
-  - guardrail: lexvault_shim.LexVaultGuardrail
-    mode: [pre_call, post_call]
-    default_on: true
+  - guardrail_name: lexvault
     litellm_params:
+      # The shim module path (LiteLLM's loader does a naive split('.') and loads
+      # <file>.py from the config dir — see lexvault_shim.py).
+      guardrail: lexvault_shim.LexVaultGuardrail
+      mode: [pre_call, post_call]
+      default_on: true
       # Path to your dictionary (mounted into the container).
       dictionary_path: /app/dictionary.yaml
       # Secret key for deterministic placeholder derivation. KEEP THIS SECRET.
-      # In production, load from env: org_key: os.environ/LEXVAULT_ORG_KEY
-      org_key: change-me-to-a-real-secret-key
+      # LiteLLM resolves the os.environ/NAME form at load time, so the value set
+      # as the LEXVAULT_ORG_KEY env var in docker-compose.yml is used here.
+      org_key: os.environ/LEXVAULT_ORG_KEY
       # Scope isolates mappings (e.g. per-team). Default is "default".
       scope: default
       # Fail-closed by default: a masking/restoring error blocks the request

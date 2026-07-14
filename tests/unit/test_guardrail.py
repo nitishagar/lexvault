@@ -306,8 +306,18 @@ class TestFailClosed:
         guardrail._vault = MagicMock()
         guardrail._vault.assign = MagicMock(side_effect=RuntimeError("vault down"))
         data = {"messages": [{"role": "user", "content": "Project Titan"}], "litellm_call_id": "r"}
-        # fail-closed raises (HTTPException under fastapi, RuntimeError otherwise).
-        with pytest.raises((RuntimeError, ModifyResponseException)):
+        # fail-closed raises. The exact type depends on whether fastapi is
+        # installed (proxy context → HTTPException; library-only → RuntimeError).
+        # Build the expected tuple from the same resolution the guardrail uses
+        # so the test is correct in BOTH environments.
+        expected: tuple = (RuntimeError, ModifyResponseException)
+        try:
+            from fastapi import HTTPException
+
+            expected = (RuntimeError, ModifyResponseException, HTTPException)
+        except ImportError:
+            pass
+        with pytest.raises(expected):
             await guardrail.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
 
     async def test_restore_error_sanitizes_when_fail_closed(self, guardrail):

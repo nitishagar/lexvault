@@ -34,10 +34,11 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
-  - guardrail: lexvault_shim.LexVaultGuardrail
-    mode: [pre_call, post_call]
-    default_on: true
+  - guardrail_name: lexvault
     litellm_params:
+      guardrail: lexvault_shim.LexVaultGuardrail
+      mode: [pre_call, post_call]
+      default_on: true
       dictionary_path: /app/dictionary.yaml
       org_key: os.environ/LEXVAULT_ORG_KEY
 ```
@@ -88,14 +89,18 @@ one-way masker can destroy a term lexvault intended to reversibly map.
 
 ```yaml
 guardrails:
-  - guardrail: lexvault_shim.LexVaultGuardrail      # FIRST — reversible mask
-    mode: [pre_call, post_call]
-    default_on: true
-    litellm_params: { ... }
-  - guardrail: litellm_content_filter                # after — one-way filter
-    mode: [pre_call, post_call]
-    default_on: true
-    litellm_params: { ... }
+  - guardrail_name: lexvault
+    litellm_params:                                  # FIRST — reversible mask
+      guardrail: lexvault_shim.LexVaultGuardrail
+      mode: [pre_call, post_call]
+      default_on: true
+      # ...lexvault params...
+  - guardrail_name: content-filter
+    litellm_params:                                  # after — one-way filter
+      guardrail: litellm_content_filter
+      mode: [pre_call, post_call]
+      default_on: true
+      # ...content-filter params...
 ```
 
 ## Protected endpoints

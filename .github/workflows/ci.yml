@@ -88,3 +88,29 @@ jobs:
 
       - name: Run integration tests
         run: pytest tests/integration -v
+
+  proxy-smoke:
+    name: End-to-end proxy smoke (boots litellm --config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system "litellm>=1.80.15"
+          uv pip install --system -e .
+
+      # CS-D3: boot the real LiteLLM proxy with the lexvault guardrail and curl
+      # a chat completion. A malformed guardrail config block crashes litellm at
+      # startup (CS-D1), so a clean boot + round-trip retroactively validates the
+      # documented quickstart. mock_response can't catch a config-shape error.
+      - name: Boot litellm --config and run smoke curl
+        run: bash examples/ci_smoke.sh

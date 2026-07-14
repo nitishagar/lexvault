@@ -6,10 +6,11 @@ pydantic model at construction, so a bad value fails fast with a clear error.
 
 ```yaml
 guardrails:
-  - guardrail: lexvault_shim.LexVaultGuardrail
-    mode: [pre_call, post_call]
-    default_on: true
+  - guardrail_name: lexvault
     litellm_params:
+      guardrail: lexvault_shim.LexVaultGuardrail
+      mode: [pre_call, post_call]
+      default_on: true
       dictionary_path: dictionary.yaml
       org_key: os.environ/LEXVAULT_ORG_KEY
       scope: default

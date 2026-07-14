@@ -7,8 +7,10 @@ A 60-second quickstart with LiteLLM + a fake backend in Docker.
 - [`config.yaml`](config.yaml) — a LiteLLM proxy config with the lexvault guardrail mounted.
 - [`lexvault_shim.py`](lexvault_shim.py) — the file-mount shim LiteLLM's loader needs.
 - [`dictionary.yaml`](dictionary.yaml) — sample proprietary terms (`Project Titan`, `customer_database`, an `EMP-\d{4,6}` regex).
-- [`docker-compose.yml`](docker-compose.yml) — boots LiteLLM + a fake OpenAI endpoint.
-- [`Dockerfile.litellm`](Dockerfile.litellm) — builds a lexvault-enabled LiteLLM image.
+- [`fake_backend.py`](fake_backend.py) — a tiny stdlib echo server that mimics an OpenAI chat completion (no deps, no network).
+- [`Dockerfile.fake-backend`](Dockerfile.fake-backend) — builds the fake backend into a small image.
+- [`docker-compose.yml`](docker-compose.yml) — boots LiteLLM + the fake backend.
+- [`Dockerfile.litellm`](Dockerfile.litellm) — builds a lexvault-enabled LiteLLM image (installs lexvault from the repo source).
 
 ## 60-second quickstart
 

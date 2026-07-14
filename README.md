@@ -57,10 +57,11 @@ model_list:
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
-  - guardrail: lexvault_shim.LexVaultGuardrail   # references the mounted shim
-    mode: [pre_call, post_call]
-    default_on: true
+  - guardrail_name: lexvault
     litellm_params:
+      guardrail: lexvault_shim.LexVaultGuardrail   # references the mounted shim
+      mode: [pre_call, post_call]
+      default_on: true
       dictionary_path: dictionary.yaml
       org_key: os.environ/LEXVAULT_ORG_KEY
       scope: default

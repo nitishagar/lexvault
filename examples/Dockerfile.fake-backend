@@ -1,0 +1,10 @@
+# Tiny fake OpenAI endpoint for the lexvault quickstart (CS-D2).
+# Builds from a stdlib-only Python image — no network egress, no deps.
+
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY fake_backend.py /app/fake_backend.py
+
+EXPOSE 8000
+CMD ["python", "/app/fake_backend.py"]
