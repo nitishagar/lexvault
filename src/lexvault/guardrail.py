@@ -27,18 +27,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import litellm.integrations.custom_guardrail as _lcg
 from litellm.integrations.custom_guardrail import CustomGuardrail
-
-# ModifyResponseException moved between litellm versions: it's in
-# `litellm.exceptions` in recent releases but only in
-# `litellm.integrations.custom_guardrail` in the 1.80.x floor. Import
-# defensively so we work across the full supported range (invariant 22).
-try:
-    from litellm.exceptions import ModifyResponseException
-except ImportError:  # pragma: no cover - litellm < ~1.81
-    from litellm.integrations.custom_guardrail import (
-        ModifyResponseException,  # type: ignore[attr-defined]
-    )
 from litellm.types.guardrails import GuardrailEventHooks
 
 from lexvault.adapters import anthropic as anthropic_adapter
@@ -56,6 +46,13 @@ from lexvault.streaming.restore import (
     streaming_restore,
 )
 from lexvault.vault import MappingVault, VaultError
+
+# ModifyResponseException moved between litellm versions: it's in
+# `litellm.exceptions` in recent releases but only available via
+# `litellm.integrations.custom_guardrail` in the 1.80.x floor. Resolve at
+# runtime via the integration module (which re-exports it everywhere) so we
+# work across the full supported range (invariant 22).
+ModifyResponseException = _lcg.ModifyResponseException  # type: ignore[attr-defined]
 
 __all__ = ["LexVaultGuardrail", "ModifyResponseException"]
 
