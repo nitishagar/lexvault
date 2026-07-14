@@ -27,8 +27,16 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from litellm.exceptions import ModifyResponseException
 from litellm.integrations.custom_guardrail import CustomGuardrail
+
+# ModifyResponseException moved between litellm versions: it's in
+# `litellm.exceptions` in recent releases but only in
+# `litellm.integrations.custom_guardrail` in the 1.80.x floor. Import
+# defensively so we work across the full supported range (invariant 22).
+try:
+    from litellm.exceptions import ModifyResponseException
+except ImportError:  # pragma: no cover - litellm < ~1.81
+    from litellm.integrations.custom_guardrail import ModifyResponseException  # type: ignore[attr-defined]
 from litellm.types.guardrails import GuardrailEventHooks
 
 from lexvault.adapters import anthropic as anthropic_adapter
