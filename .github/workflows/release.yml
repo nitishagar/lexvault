@@ -1,0 +1,72 @@
+name: Release
+
+# Publish lexvault to PyPI via Trusted Publishing (OIDC).
+#
+# This workflow is real and Trusted-Publisher-wired, but no package is published
+# until a `vX.Y.Z` tag is cut with explicit approval. The first publish is gated
+# on human sign-off (Phase 6 of the plan).
+#
+# Trusted Publisher setup (one-time, manual):
+#   1. https://pypi.org/manage/account/publishing/
+#   2. Add a pending publisher: PyPI project name "lexvault", environment
+#      "pypi", repo "nitishagar/lexvault", workflow "release.yml".
+#   3. On first tag, the OIDC exchange creates the project.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build dist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build wheel + sdist
+        run: python -m build
+
+      - name: Check the dist
+        run: twine check dist/*
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/lexvault/
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing
+      contents: read
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # PEP 740 attestations are on by default under Trusted Publishing —
+        # satisfies Scorecard signed-releases at no cost.
+        with:
+          attestations: true

@@ -67,3 +67,25 @@ jobs:
 
       - name: Run tests
         run: pytest -v
+
+  integration:
+    name: Integration tests (latest litellm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies (latest litellm)
+        run: |
+          uv pip install --system "litellm>=1.80.15"
+          uv pip install --system -e . pytest pytest-asyncio
+
+      - name: Run integration tests
+        run: pytest tests/integration -v
