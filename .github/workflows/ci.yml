@@ -89,6 +89,40 @@ jobs:
       - name: Run integration tests
         run: pytest tests/integration -v
 
+  coverage:
+    name: Coverage (≥90% core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system "litellm>=1.80.15"
+          uv pip install --system -e ".[dev]" pytest pytest-asyncio
+
+      # CS-A1: enforce ≥90% coverage on the core masking modules (the MVP's
+      # correctness core: engine, vault, detector, streaming). Adapters/guardrail
+      # are covered by round-trip + integration tests but include best-effort
+      # defensive branches; overall coverage is reported but not gated.
+      - name: Run tests with coverage gate
+        run: |
+          pytest tests/ -q \
+            --cov=lexvault.engine \
+            --cov=lexvault.vault \
+            --cov=lexvault.detector \
+            --cov=lexvault.streaming.buffer \
+            --cov=lexvault.streaming.restore \
+            --cov-fail-under=90 \
+            --cov-report=term-missing
+
   proxy-smoke:
     name: End-to-end proxy smoke (boots litellm --config)
     runs-on: ubuntu-latest

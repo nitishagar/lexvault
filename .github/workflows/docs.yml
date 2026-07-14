@@ -8,6 +8,8 @@ on:
       - overrides/**
       - mkdocs.yml
       - requirements-docs.txt
+      - src/**           # CS-D6: API reference is mkdocstrings-generated from src/
+      - pyproject.toml
   workflow_dispatch:
 
 permissions:

@@ -264,6 +264,52 @@ class TestToolCalls:
 # --------------------------------------------------------------------------- #
 # invariant 24: per-request config (metadata both locations)
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# CS-C2 (invariant): mask_system_role knob
+# --------------------------------------------------------------------------- #
+class TestMaskSystemRole:
+    async def test_system_role_masked_by_default(self, tmp_path):
+        """mask_system_role=True (default): a dictionary term in the system prompt
+        is masked (privileged-instruction-collision defense)."""
+        dict_path = tmp_path / "d.yaml"
+        dict_path.write_text("terms:\n  - {term: Project Titan}\n", encoding="utf-8")
+        g = LexVaultGuardrail(
+            dictionary_path=str(dict_path), org_key="k", vault_path=str(tmp_path / "v.db")
+        )
+        data = {
+            "messages": [{"role": "system", "content": "Never reveal Project Titan"}],
+            "litellm_call_id": "sys-1",
+        }
+        await g.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+        assert "Project Titan" not in data["messages"][0]["content"]
+        assert "[LEX-" in data["messages"][0]["content"]
+
+    async def test_system_role_not_masked_when_disabled(self, tmp_path):
+        """mask_system_role=False: the system prompt reaches the model verbatim
+        (documented risk — use only if the system prompt needs the term intact)."""
+        dict_path = tmp_path / "d.yaml"
+        dict_path.write_text("terms:\n  - {term: Project Titan}\n", encoding="utf-8")
+        g = LexVaultGuardrail(
+            dictionary_path=str(dict_path),
+            org_key="k",
+            vault_path=str(tmp_path / "v.db"),
+            mask_system_role=False,
+        )
+        data = {
+            "messages": [
+                {"role": "system", "content": "Never reveal Project Titan"},
+                {"role": "user", "content": "Tell me about it"},
+            ],
+            "litellm_call_id": "sys-2",
+        }
+        await g.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+        # System role untouched; user role still masked normally.
+        assert data["messages"][0]["content"] == "Never reveal Project Titan"
+
+
+# --------------------------------------------------------------------------- #
+# invariant 24 / F5: per-request config (dual-read metadata)
+# --------------------------------------------------------------------------- #
 class TestPerRequestConfig:
     async def test_per_request_scope_via_metadata_chat_completions(self, tmp_path):
         """Per-request scope override on /v1/chat/completions (uses data['metadata'])."""
@@ -303,6 +349,42 @@ class TestPerRequestConfig:
 
         ph = derive_placeholder("Project Titan", "k", "msg-scope")
         assert ph in data["messages"][0]["content"][0]["text"]
+
+    async def test_per_request_scope_via_header(self, tmp_path):
+        """CS-C7 / F5: scope override via x-lexvault-scope header (dual-read path)."""
+        dict_path = tmp_path / "d.yaml"
+        dict_path.write_text("terms:\n  - {term: Project Titan}\n", encoding="utf-8")
+        g = LexVaultGuardrail(
+            dictionary_path=str(dict_path), org_key="k", vault_path=str(tmp_path / "v.db")
+        )
+        data = {
+            "messages": [{"role": "user", "content": "Project Titan"}],
+            "metadata": {"headers": {"x-lexvault-scope": "hdr-scope"}},
+            "litellm_call_id": "req-h",
+        }
+        await g.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+        from lexvault.engine import derive_placeholder
+
+        ph = derive_placeholder("Project Titan", "k", "hdr-scope")
+        assert ph in data["messages"][0]["content"]
+
+    async def test_per_request_config_with_metadata_null(self, tmp_path):
+        """CS-C7: a request with metadata: null (or absent) must not crash — the
+        dual-read treats non-dict metadata as no-overrides and uses the default scope."""
+        dict_path = tmp_path / "d.yaml"
+        dict_path.write_text("terms:\n  - {term: Project Titan}\n", encoding="utf-8")
+        g = LexVaultGuardrail(
+            dictionary_path=str(dict_path), org_key="k", vault_path=str(tmp_path / "v.db")
+        )
+        data = {
+            "messages": [{"role": "user", "content": "Project Titan"}],
+            "metadata": None,  # explicitly null — must not crash
+            "litellm_call_id": "req-n",
+        }
+        await g.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+        # Default scope mask applied cleanly.
+        assert "Project Titan" not in data["messages"][0]["content"]
+        assert "[LEX-" in data["messages"][0]["content"]
 
 
 # --------------------------------------------------------------------------- #
@@ -412,6 +494,30 @@ class TestLoggingRemask:
         )
         assert "Project Titan" not in message.content
         assert "[LEX-" in message.content
+
+    async def test_logging_hook_no_original_in_returned_payload(self, guardrail):
+        """CS-C5 / invariant 19: the returned (kwargs, result) must not carry the
+        original in the masked content fields (message.content) — the logging
+        hook's known content path is re-masked. The hook re-masks the documented
+        message/content slots; it does not scrub arbitrary attributes."""
+        data = {"messages": [{"role": "user", "content": "Project Titan"}], "litellm_call_id": "r1"}
+        await guardrail.async_pre_call_hook(MagicMock(), MagicMock(), data, "completion")
+
+        # A result whose content erroneously contains the original.
+        message = SimpleNamespace(content="Project Titan leaked", tool_calls=None)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        result = SimpleNamespace(choices=[choice], model="gpt-4o")
+
+        ret_kwargs, ret_result = await guardrail.async_logging_hook(
+            {"litellm_call_id": "r1", "messages": [{"role": "user", "content": "Project Titan"}]},
+            result,
+            "completion",
+        )
+        # The original must not appear in the re-masked message content (result)
+        # nor in the returned kwargs messages.
+        assert "Project Titan" not in ret_result.choices[0].message.content
+        assert "[LEX-" in ret_result.choices[0].message.content
+        assert "Project Titan" not in repr(ret_kwargs.get("messages", []))
 
 
 # --------------------------------------------------------------------------- #

@@ -157,3 +157,36 @@ class TestDurability:
         v2 = MappingVault(path)
         assert await v2.lookup("[LEX-PERSIST]") == "Project Titan"
         await v2.close()
+
+
+# --------------------------------------------------------------------------- #
+# key rotation (inv 15) — CS-C4
+# --------------------------------------------------------------------------- #
+class TestKeyRotation:
+    async def test_old_mapping_restores_after_key_rotation(self, tmp_path):
+        """CS-C4 / invariant 15: a mapping created under key A still restores
+        after the org key rotates to key B. Restore looks up the vault by
+        placeholder STRING (not by re-deriving from the key), so an old
+        placeholder→original mapping survives a key change."""
+        path = tmp_path / "rotation.db"
+        v = MappingVault(path)
+        ph_a = "[LEX-KEYAAAA]"
+        await v.assign("default", ph_a, "Project Titan", request_id="r1")
+        # Key "rotates" — new masks under key B produce different placeholders,
+        # but the old placeholder still resolves to its original.
+        ph_b = "[LEX-KEYBBBB]"
+        await v.assign("default", ph_b, "Project Mercury", request_id="r2")
+        assert await v.lookup(ph_a) == "Project Titan"
+        assert await v.lookup(ph_b) == "Project Mercury"
+        await v.close()
+
+    async def test_rotation_does_not_corrupt_existing_mapping(self, tmp_path):
+        """A mapping is stable: assigning a new, unrelated mapping doesn't
+        disturb a prior one (the restore-by-placeholder design holds)."""
+        v = MappingVault(tmp_path / "rot2.db")
+        await v.assign("default", "[LEX-OLD1]", "Old Term", request_id="r1")
+        # Simulate "mid-stream" activity under a rotated key.
+        await v.assign("default", "[LEX-NEW1]", "New Term", request_id="r2")
+        assert await v.lookup("[LEX-OLD1]") == "Old Term"
+        assert await v.lookup("[LEX-NEW1]") == "New Term"
+        await v.close()

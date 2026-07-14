@@ -55,6 +55,7 @@ dev = [
     "mypy>=1.11",
     "pytest>=7.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
 ]
@@ -129,3 +130,12 @@ minversion = "7.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra"
+
+[tool.coverage.run]
+source = ["lexvault"]
+branch = true
+
+[tool.coverage.report]
+# CS-A1: the ≥90% gate is scoped to core modules via CI flags (engine/vault/
+# detector/streaming). Overall coverage is reported for visibility.
+show_missing = true
