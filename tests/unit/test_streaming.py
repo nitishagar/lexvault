@@ -128,6 +128,67 @@ class TestBuffer:
         assert partial is False
         assert remaining == "plain trailing text"
 
+    # -- CS-E1: opener-prefix-aware hold-back (the reproduced blocker) -------- #
+
+    def test_opener_prefix_cut_does_not_leak(self):
+        """CS-E1: a cut landing INSIDE the opener prefix must not leak the placeholder.
+
+        Feeding 'x'*10 + '[LEX-AAAAAAAA]' + 'z'*6 with window 19 puts the cut at
+        offset 11 — the ready slice ends with '[' (a prefix of the opener '[LEX-').
+        Before the fix no hold-back fired and the full placeholder was emitted
+        verbatim. This is the exact RC4 split-placeholder leak the product exists
+        to prevent.
+        """
+        placeholder = "[LEX-AAAAAAAA]"
+
+        def lookup(ph: str) -> str | None:
+            return "Codename" if ph == placeholder else None
+
+        buf = PlaceholderBuffer(19, NS)
+        buf.feed("x" * 10 + placeholder + "z" * 6)  # len 30; cut = 30 - 19 = 11
+        out = buf.drain_restored_with_vault(lookup)
+        out += buf.flush_restored_with_vault(lookup)[0]
+        assert "Codename" in out
+        assert placeholder not in out
+        assert "[LEX-" not in out  # no partial opener leaked either
+
+    @pytest.mark.parametrize("offset", range(len("[LEX-AAAAAAAA]") + 1))
+    def test_placeholder_split_at_every_feed_offset(self, offset):
+        """CS-E1: a placeholder split across two feeds at ANY internal offset
+        (including every offset inside the opener '[LEX-') restores whole.
+
+        Exhaustive over 0..len(placeholder): the cut sweeps through every byte
+        of the placeholder across the two feed boundaries.
+        """
+        placeholder = "[LEX-AAAAAAAA]"
+
+        def lookup(ph: str) -> str | None:
+            return "Codename" if ph == placeholder else None
+
+        prefix = "padding!!"  # 9 chars before the placeholder
+        suffix = "trailing!!"  # 10 chars after
+        text = prefix + placeholder + suffix
+        split = len(prefix) + offset  # cut at offset within / just past placeholder
+
+        buf = PlaceholderBuffer(WINDOW, NS)
+        buf.feed(text[:split])
+        out = buf.drain_restored_with_vault(lookup)
+        buf.feed(text[split:])
+        out += buf.drain_restored_with_vault(lookup)
+        out += buf.flush_restored_with_vault(lookup)[0]
+        assert "Codename" in out
+        assert placeholder not in out
+        assert "[LEX-" not in out
+
+    def test_flush_partial_when_tail_is_opener_prefix(self):
+        """CS-E1: a tail ending in a proper prefix of the opener (e.g. '[LEX')
+        is a potential partial placeholder — flush must signal partial_in_namespace
+        (fail-closed), not emit it as plain text."""
+        buf = PlaceholderBuffer(WINDOW, NS)
+        buf.feed("ending [LEX")  # '[LEX' is a proper prefix of opener '[LEX-'
+        _remaining, partial = buf.flush_restored_with_vault(_noop_lookup)
+        assert partial is True
+
 
 # --------------------------------------------------------------------------- #
 # SseReframer — mid-frame byte splits (inv 6)

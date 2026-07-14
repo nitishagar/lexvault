@@ -86,18 +86,25 @@ class PlaceholderBuffer:
         portion whose closing ``]`` would fall in the held window). This is the
         RC4 correctness core: a placeholder is never split across an emit, so
         ``_restore_inplace`` always sees complete placeholders.
+
+        We ALSO hold back a trailing *proper prefix* of the opener (e.g. ``[``,
+        ``[L``, ``[LE``, ``[LEX``) at the end of the ready slice — if the held
+        window completes it into a full placeholder, emitting the prefix now
+        would split the placeholder across an emit (CS-E1: the straddle leak).
         """
         if len(self._buf) <= self._window:
             return ""
         cut = len(self._buf) - self._window
         ready_candidate = self._buf[:cut]
-        # If an unclosed opener sits in the ready portion, hold back from it so
-        # the (potentially complete) placeholder stays whole in the buffer until
-        # its close arrives.
-        opener_pos = self._last_unclosed_opener(ready_candidate)
-        if opener_pos >= 0:
-            cut = opener_pos
-            ready_candidate = self._buf[:cut]
+        # Hold back from the leftmost detected partial-opener boundary:
+        #  (a) a full unclosed opener anywhere in the ready slice, or
+        #  (b) a trailing proper prefix of the opener at the slice's end.
+        # Both signal the start of a placeholder that may complete in the held
+        # window; holding keeps that placeholder whole so _restore_inplace sees
+        # it in one piece.
+        hold = self._hold_back_point(ready_candidate)
+        if hold >= 0:
+            cut = hold
         ready, self._buf = self._buf[:cut], self._buf[cut:]
         return _restore_inplace(ready, self._ns_re, lookup)
 
@@ -126,15 +133,35 @@ class PlaceholderBuffer:
     def held_bytes(self) -> int:
         return len(self._buf)
 
+    def _hold_back_point(self, ready: str) -> int:
+        """Index in ``ready`` at/before which text is safe to emit, else -1.
+
+        Returns the leftmost position we must hold back from, considering:
+          (a) a full unclosed opener in ``ready`` (its close would fall in the
+              held window), and
+          (b) a trailing proper prefix of the opener at the end of ``ready``
+              (``[``, ``[L``, ``[LE``, ``[LEX``) — if the held window completes
+              it into a full placeholder, emitting the prefix now would split
+              the placeholder (CS-E1 straddle leak).
+
+        Holding from the smaller of the two keeps the whole potential
+        placeholder in the buffer until its close arrives or stream ends.
+        """
+        full = self._last_unclosed_opener(ready)
+        prefix = self._trailing_opener_prefix_len(ready)
+        candidates = [c for c in (full, prefix) if c >= 0]
+        return min(candidates) if candidates else -1
+
     def _has_unclosed_opener(self, text: str) -> bool:
-        """True if ``text`` ends with an unclosed placeholder opener."""
-        return self._last_unclosed_opener(text) >= 0
+        """True if ``text`` ends with an unclosed placeholder opener OR a proper
+        prefix of the opener (a potential partial placeholder)."""
+        return self._last_unclosed_opener(text) >= 0 or self._trailing_opener_prefix_len(text) >= 0
 
     def _last_unclosed_opener(self, text: str) -> int:
         """Index of the last opener in ``text`` not followed by ``]``, else -1.
 
         E.g. ``"ending [LEX-AAA"`` → the opener ``[LEX-`` appears and no ``]``
-        follows it → its index. A complete placeholder (``[LEX-AAAAAAAA]``) or
+        follows it → its index. A complete placeholder (``[LEX-AAAAAAAA]]``) or
         plain text → -1.
         """
         if not self._opener or not text:
@@ -146,6 +173,28 @@ class PlaceholderBuffer:
         if "]" in tail:
             return -1
         return idx
+
+    def _trailing_opener_prefix_len(self, text: str) -> int:
+        """Start index of a trailing proper prefix of the opener, else -1.
+
+        CS-E1: if ``text`` ends with a proper (non-empty, non-full) prefix of
+        the opener — e.g. ``[``, ``[L``, ``[LE``, ``[LEX`` for opener ``[LEX-`` —
+        the held window may complete it into a full placeholder. Returns the
+        index where that prefix begins so the caller can hold it back.
+
+        Only the LONGEST trailing prefix matters (it dominates shorter ones):
+        for opener ``[LEX-`` on text ending ``...X[LEX``, the prefix ``[LEX``
+        (length 4) begins at ``len(text)-4``.
+        """
+        if not self._opener or not text:
+            return -1
+        # Longest trailing substring of `text` that is a proper prefix of the
+        # opener. Bound the scan by the shorter of the two strings.
+        max_len = min(len(self._opener) - 1, len(text))
+        for n in range(max_len, 0, -1):
+            if text[-n:] == self._opener[:n]:
+                return len(text) - n
+        return -1
 
 
 def _restore_inplace(text: str, ns_re: re.Pattern[str], lookup: Lookup) -> str:
