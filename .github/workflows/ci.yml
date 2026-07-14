@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type:
+    name: Lint + type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install the package + dev tools
+        run: |
+          uv pip install --system -e .
+          uv pip install --system ruff mypy
+
+      - name: Ruff check
+        run: ruff check src tests
+
+      - name: Ruff format check
+        run: ruff format --check src tests
+
+      - name: mypy strict
+        run: mypy src/lexvault
+
+  test:
+    name: Test (py${{ matrix.python }} · litellm${{ matrix.litellm }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        litellm: ["==1.80.15", ">=1.80.15"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system "litellm${{ matrix.litellm }}"
+          uv pip install --system -e . pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest -v

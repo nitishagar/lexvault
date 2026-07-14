@@ -1,0 +1,30 @@
+lexvault
+Copyright 2026 nitishagar
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+----------------------------------------------------------------------------
+
+This product bundles or depends on the following third-party software:
+
+  pyahocorasick — Copyright (c) 2016, Wojciech Muła and other contributors.
+    Licensed under the BSD 3-Clause License.
+    https://github.com/WojciechMula/pyahocorasick
+
+  litellm — Copyright (c) BerriAI.
+    Licensed under the MIT License.
+    https://github.com/BerriAI/litellm
+
+  pydantic — Copyright (c) 2017 to present, Pydantic Services Inc.
+    Licensed under the MIT License.
+    https://github.com/pydantic/pydantic
