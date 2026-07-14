@@ -109,10 +109,16 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 files = ["src/lexvault"]
+# lexvault parses arbitrary, dynamic provider JSON (OpenAI/Anthropic/Responses
+# shapes vary across versions). Forcing dict[str, Any]/list[Any] on every local
+# that holds such a shape adds noise without catching real bugs; disable the
+# bare-generic lint while keeping every other strict check.
+disable_error_code = ["type-arg"]
 
-# pyahocorasick has no type stubs; types-PyYAML provides yaml stubs (dev dep).
+# pyahocorasick has no type stubs; fastapi is an optional litellm proxy dep
+# (absent in library-only installs); litellm is dynamic.
 [[tool.mypy.overrides]]
-module = ["ahocorasick"]
+module = ["ahocorasick", "fastapi"]
 ignore_missing_imports = true
 
 # --------------------------------------------------------------------------- #
