@@ -1,0 +1,32 @@
+# LiteLLM proxy config with the lexvault guardrail.
+#
+# Mount this file + lexvault_shim.py + dictionary.yaml next to each other and run:
+#   litellm --config /app/config.yaml
+#
+# In Docker (see docker-compose.yml) lexvault is pip-installed into the container
+# and the shim re-exports LexVaultGuardrail for LiteLLM's naive split('.') loader.
+
+model_list:
+  - model_name: fake
+    litellm_params:
+      # A mock/fake model for the quickstart — no real API key needed.
+      # For a real deployment, use e.g. model: openai/gpt-4o with an api_key.
+      model: openai/fake
+      api_key: fake-key
+      api_base: http://fake-backend:8000
+
+guardrails:
+  - guardrail: lexvault_shim.LexVaultGuardrail
+    mode: [pre_call, post_call]
+    default_on: true
+    litellm_params:
+      # Path to your dictionary (mounted into the container).
+      dictionary_path: /app/dictionary.yaml
+      # Secret key for deterministic placeholder derivation. KEEP THIS SECRET.
+      # In production, load from env: org_key: os.environ/LEXVAULT_ORG_KEY
+      org_key: change-me-to-a-real-secret-key
+      # Scope isolates mappings (e.g. per-team). Default is "default".
+      scope: default
+      # Fail-closed by default: a masking/restoring error blocks the request
+      # rather than leaking an original term. Set true to pass through instead.
+      fail_open: false

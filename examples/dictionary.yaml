@@ -1,0 +1,20 @@
+# Sample lexvault dictionary.
+#
+# Define the proprietary terms you want masked on the way to the LLM and
+# restored on the way back. These are YOUR terms (codenames, products,
+# customers, schema) — not classic PII.
+
+# Literal terms: matched via Aho-Corasick (case-insensitive by default).
+terms:
+  - term: Project Titan
+    type: codename
+  - term: customer_database
+    type: schema
+  - term: Acquisition Zephyr
+    type: codename
+
+# Regex terms: for structured internal IDs.
+regex_terms:
+  - name: Employee ID
+    pattern: 'EMP-\d{4,6}'
+    type: id

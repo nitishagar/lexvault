@@ -1,0 +1,37 @@
+# lexvault + LiteLLM 60-second quickstart.
+#
+#   docker compose -f examples/docker-compose.yml up
+#   curl http://localhost:4000/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{"model":"fake","messages":[{"role":"user","content":"What is Project Titan?"}]}'
+#
+# The fake backend echoes requests, so you can see that "Project Titan" is
+# masked to a placeholder upstream and restored in the response.
+
+services:
+  # A tiny fake OpenAI endpoint that echoes the request (so you can observe the
+  # masked placeholder reaching the "model") and returns a canned response.
+  fake-backend:
+    image: ghcr.io/berriai/fake-openai-endpoint:latest
+    # Fallback if the image is unavailable: a 10-line Python echo server is
+    # documented in examples/README.md.
+    ports:
+      - "8000:8000"
+
+  litellm:
+    # Uses the Dockerfile that pip-installs lexvault on top of the official image.
+    build:
+      context: .
+      dockerfile: Dockerfile.litellm
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./lexvault_shim.py:/app/lexvault_shim.py:ro
+      - ./dictionary.yaml:/app/dictionary.yaml:ro
+    command: --config /app/config.yaml --port 4000 --num_workers 1
+    environment:
+      # Set a real org key for deterministic placeholders (keep secret).
+      LEXVAULT_ORG_KEY: change-me-to-a-real-secret-key
+    depends_on:
+      - fake-backend

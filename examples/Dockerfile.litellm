@@ -1,0 +1,15 @@
+# lexvault-enabled LiteLLM proxy image.
+#
+# Builds on the official LiteLLM image and pip-installs lexvault so the
+# file-mount shim can import it.
+
+FROM ghcr.io/berriai/litellm:main-stable
+
+# Install lexvault from PyPI (or, for local dev, copy the wheel first).
+# For local development from source, uncomment the COPY + install lines:
+# COPY dist/lexvault-*.whl /tmp/
+# RUN pip install --no-cache-dir /tmp/lexvault-*.whl
+RUN pip install --no-cache-dir lexvault
+
+# The config.yaml, lexvault_shim.py, and dictionary.yaml are volume-mounted
+# (see docker-compose.yml), so no COPY needed here.
