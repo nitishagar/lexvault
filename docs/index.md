@@ -6,12 +6,6 @@ hide:
   - toc
 ---
 
-# lexvault
-
-> Reversible proprietary-term pseudonymization for LiteLLM. Mask your codenames,
-> products, customers, and schema on the way out — restore them faithfully on
-> the way back.
-
 lexvault is a [LiteLLM](https://github.com/BerriAI/litellm) proxy plugin that
 swaps an enterprise's *own* dictionary terms for deterministic placeholders on
 the request path and restores them on the response path — with **zero un-restored

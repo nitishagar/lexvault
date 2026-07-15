@@ -1,14 +1,126 @@
 /* lexvault docs custom styles */
 
-/* Slightly larger hero on wide screens. */
-.md-typeset .lexvault-hero h1 {
-  letter-spacing: -0.02em;
+/* ---------- Homepage hero ---------- */
+
+.lexvault-hero-section {
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
 }
 
-/* Feature grid on the homepage. */
-.md-typeset .lexvault-features {
-  margin-top: 2rem;
+.lexvault-hero {
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 5rem 1rem 4.5rem;
+  text-align: center;
 }
+
+.lexvault-hero .lexvault-kicker {
+  font-family: var(--md-code-font-family);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-default-fg-color--light);
+  margin-bottom: 1rem;
+}
+
+.md-typeset .lexvault-hero h1 {
+  font-family: var(--md-code-font-family);
+  font-size: 2.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--md-default-fg-color);
+  margin: 0 0 0.8rem;
+}
+
+.lexvault-hero .lexvault-tagline {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--md-default-fg-color--light);
+  margin: 0 auto 2rem;
+  max-width: 28rem;
+}
+
+.lexvault-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.15rem;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 2rem;
+  background: var(--md-code-bg-color);
+}
+
+.lexvault-install code {
+  font-family: var(--md-code-font-family);
+  font-size: 0.75rem;
+  background: none;
+  padding: 0;
+  color: var(--md-default-fg-color);
+}
+
+.lexvault-install .lexvault-prompt {
+  color: var(--md-default-fg-color--light);
+  margin-right: 0.3rem;
+  user-select: none;
+}
+
+.lexvault-copy {
+  font-family: var(--md-code-font-family);
+  font-size: 0.65rem;
+  color: var(--md-default-fg-color--light);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lexvault-copy:hover {
+  color: var(--md-accent-fg-color);
+}
+
+.lexvault-hero .lexvault-cta {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.md-typeset .lexvault-hero .md-button {
+  font-size: 0.7rem;
+  padding: 0.5rem 1.2rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.15rem;
+  color: var(--md-default-fg-color);
+  background: transparent;
+}
+
+.md-typeset .lexvault-hero .md-button:hover {
+  border-color: var(--md-default-fg-color);
+  color: var(--md-default-fg-color);
+  background: transparent;
+}
+
+.md-typeset .lexvault-hero .md-button--primary {
+  background: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color);
+  color: var(--md-default-bg-color);
+}
+
+.md-typeset .lexvault-hero .md-button--primary:hover {
+  opacity: 0.85;
+  color: var(--md-default-bg-color);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .lexvault-hero {
+    padding: 3rem 1rem 2.5rem;
+  }
+  .md-typeset .lexvault-hero h1 {
+    font-size: 2rem;
+  }
+}
+
+/* ---------- General ---------- */
 
 /* Keep code blocks readable in both themes. */
 .md-typeset pre > code {

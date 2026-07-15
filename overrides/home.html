@@ -3,66 +3,32 @@
 {% block tabs %}
 {{ super() }}
 
-<!-- Hero section: only on the home page (docs.index). -->
 <style>
-  .lexvault-hero {
-    margin: 2rem 0 1rem;
-    padding: 2rem 1.5rem;
-    text-align: center;
-  }
-  .lexvault-hero h1 {
-    font-size: 2.6rem;
-    margin-bottom: 0.5rem;
-    font-weight: 700;
-  }
-  .lexvault-hero .lexvault-tagline {
-    font-size: 1.2rem;
-    opacity: 0.8;
-    margin-bottom: 1.5rem;
-  }
-  .lexvault-hero .lexvault-cta {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: center;
-    flex-wrap: wrap;
-    margin-top: 1.5rem;
-  }
-  .lexvault-hero .md-button {
-    font-size: 1rem;
-    padding: 0.6rem 1.4rem;
-  }
-  .lexvault-features {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 1rem;
-    margin: 2rem 0;
-  }
-  .lexvault-feature {
-    padding: 1rem;
-    border-radius: 0.5rem;
-    border: 1px solid var(--md-default-fg-color--lightest);
-  }
-  .lexvault-feature h3 { margin-top: 0; }
+  /* Home page only: the hero carries the title, so hide the auto-generated
+     content heading and the edit/view actions next to it. */
+  .md-content .md-typeset h1:first-of-type { display: none; }
+  .md-content__button { display: none; }
 </style>
 
-<section class="md-main__inner">
-  <div class="lexvault-hero">
-    <h1>lexvault</h1>
-    <p class="lexvault-tagline">
-      Reversible proprietary-term pseudonymization for LiteLLM.<br>
-      Mask your codenames, products, and schema on the way out — restore them faithfully on the way back.
-    </p>
-    <div class="lexvault-cta">
-      <a href="quickstart/" class="md-button md-button--primary">Get started</a>
-      <a href="concepts/" class="md-button">Why lexvault?</a>
-      <a href="https://github.com/nitishagar/lexvault" class="md-button">GitHub</a>
+<section class="lexvault-hero-section">
+  <div class="md-grid md-typeset">
+    <div class="lexvault-hero">
+      <p class="lexvault-kicker">reversible pseudonymization for LiteLLM</p>
+      <h1>lexvault</h1>
+      <p class="lexvault-tagline">
+        Mask your codenames, products, customers, and schema on the way out —
+        restore them faithfully on the way back.
+      </p>
+      <div class="lexvault-install">
+        <code><span class="lexvault-prompt">$</span> pip install lexvault</code>
+        <button class="lexvault-copy" title="Copy to clipboard"
+                onclick="navigator.clipboard.writeText('pip install lexvault');this.textContent='copied';setTimeout(()=>this.textContent='copy',1200)">copy</button>
+      </div>
+      <div class="lexvault-cta">
+        <a href="{{ 'quickstart/' | url }}" class="md-button md-button--primary">Get started</a>
+        <a href="{{ config.repo_url }}" class="md-button">GitHub</a>
+      </div>
     </div>
   </div>
 </section>
-
-<!-- Render the markdown body (the rest of index.md) below the hero. -->
-{% endblock %}
-
-{% block content %}
-{{ super() }}
 {% endblock %}
