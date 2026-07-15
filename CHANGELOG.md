@@ -21,4 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI (lint + type-check + test matrix on Python 3.10–3.13 × litellm
   floor+latest) and Trusted-Publishing release workflow.
 
-[Unreleased]: https://github.com/nitishagar/lexvault/compare/main...HEAD
+## [0.1.0] - 2026-07-15
+
+### Added
+- First public release on PyPI. Reversible proprietary-term
+  pseudonymization guardrail for LiteLLM — dictionary + regex detection,
+  deterministic HMAC placeholders, leftmost-longest overlap resolution,
+  local SQLite mapping vault.
+- LiteLLM `CustomGuardrail` plugin (individual hooks only, no
+  `apply_guardrail`) covering OpenAI + Anthropic-native, streaming
+  (`ModelResponseStream` and raw Anthropic SSE bytes), and tool-call
+  arguments.
+- File-mount shim, 60-second Docker quickstart, and MkDocs Material docs.
+
+[Unreleased]: https://github.com/nitishagar/lexvault/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nitishagar/lexvault/releases/tag/v0.1.0
